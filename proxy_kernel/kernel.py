@@ -6,8 +6,8 @@ from tornado.ioloop import IOLoop
 import zmq
 from zmq.eventloop import ioloop
 
-# ...
 ioloop.install()
+# Rely on Socket subclass that returns Futures for recv*
 from zmq.eventloop.future import Context
 
 from jupyter_client import AsyncKernelManager
@@ -60,7 +60,7 @@ class ProxiedKernel(Kernel):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # TODO: Unsure, investigate
+        # Ensure the kernel we work with uses Futures on recv, so we can await them
         self.future_context = ctx = Context()
 
         # Our subscription to messages from the kernel we launch
@@ -81,7 +81,7 @@ class ProxiedKernel(Kernel):
         super().start()
         loop = IOLoop.current()
         # Collect and send all IOPub messages, for all time
-        # TODO: create as an asyncio.Task, register a done callback with error logging
+        # TODO: Check errors from this loop and restart as needed (or shut down the kernel)
         loop.add_callback(self.relay_iopub_messages)
 
     async def relay_iopub_messages(self):
@@ -91,20 +91,19 @@ class ProxiedKernel(Kernel):
             # Send the message up to our consumer (e.g. notebook)
             self.iopub_socket.send_multipart(msg)
 
-    async def start_kernel(self):
+    async def start_kernel(self, config=None):
         # Create a connection file that is named as a child of this kernel
         base, ext = os.path.splitext(self.parent.connection_file)
         cf = "{base}-child{ext}".format(base=base, ext=ext,)
 
         self.log.debug("start our child kernel")
 
-        # TODO: configurability heads into here
+        # TODO: pass config into kernel launch
         km = AsyncKernelManager(
             kernel_name="python3",
             # Pass our IPython session as the session for the KernelManager
             session=self.session,
-            # TODO: Understand better
-            # The ZeroMQ Context is not our own
+            # Use the same ZeroMQ context that allows for awaiting on recv
             context=self.future_context,
             connection_file=cf,
         )
@@ -115,9 +114,11 @@ class ProxiedKernel(Kernel):
         self.iosub.connect(kernel.iopub_url)
 
         # TODO: Make sure the kernel is really started
-        # This is currently pretend. Our next step is repeatedly checking on
-        # the kernel with kernel_info_requests as well as looking at kernel logs
-        # which we'll be able to use to customize information sent back to the user
+        #       We can do that using kernel_info_requests as well as looking
+        #       at the kernel logs. We can use both of those to customize
+        #       the information we send back to the user.
+        #
+        # For now, we'll pretend the kernel takes 3 seconds to start
         await asyncio.sleep(3)
 
         return kernel
@@ -130,12 +131,22 @@ class ProxiedKernel(Kernel):
 
         return self.child_kernel
 
-    async def queue_before_relay(self, stream, ident, parent, config=None):
+    async def queue_before_relay(self, stream, ident, parent):
         kernel = await self.get_kernel()
         self.session.send(kernel.shell, parent, ident=ident)
 
-    async def launch_kernel_with_parameters(self, config):
+    async def launch_kernel_with_parameters(self, stream, ident, parent, config):
+        self.log.debug(dir(self))
+
+        content = parent[u"content"]
+        code = content[u"code"]
+        # TODO: Determine if we care about the silent flag, store_history, etc.
+        self._publish_execute_input(code, parent, self.execution_count)
+        self._publish_status(u"busy")
+
         # Ensure that only one coroutine is getting a kernel
+        # Functionally similar to get_kernel except it passes config
+        # and errors when the kernel is already launched
         async with self.acquiring_kernel:
             if self.child_kernel is None:
                 self.child_kernel = await self.start_kernel(config)
@@ -143,6 +154,29 @@ class ProxiedKernel(Kernel):
                 # TODO: Warn the user that they can't change the config on the live kernel
                 self.log.error("kernel already launched")
                 pass
+
+        # Complete the "execution request" so the jupyter client (e.g. the notebook) thinks
+        # execution is finished
+        reply_content = {
+            u"status": u"ok",
+            # TODO: Adjust this since we're one step behind the "real" kernel
+            u"execution_count": 0,
+            # Note: user_expressions are not supported on our kernel creation magic
+            u"user_expressions": {},
+            u"payload": {},
+        }
+
+        metadata = {u"parametrized-kernel": True, u"status": reply_content["status"]}
+
+        self.session.send(
+            stream,
+            u"execute_reply",
+            reply_content,
+            parent,
+            metadata=metadata,
+            ident=ident,
+        )
+        self._publish_status(u"idle")
 
     def parse_cell(self, cell):
         if not cell.startswith("%%kernel.config"):
@@ -166,7 +200,9 @@ class ProxiedKernel(Kernel):
             # Launch the kernel with the config to start
             # However, if the kernel is already started and we see this cell
             # We need to inform the user
-            asyncio.create_task(self.launch_kernel_with_parameters(config))
+            asyncio.create_task(
+                self.launch_kernel_with_parameters(stream, ident, parent, config)
+            )
             # TODO: Respond to the execution message since this came from execution...
 
         else:
