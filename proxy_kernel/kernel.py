@@ -70,8 +70,10 @@ class ProxiedKernel(Kernel):
         # From kernelapp.py, shell_streams is typically shell_stream, control_stream
         self.shell_stream = self.shell_streams[0]
 
-        # We don't have a kernel yet
-        self.kernel = None
+        # Start with no child kernel
+        self.child_kernel = None
+
+        self.kernel_config = None
 
         self.acquiring_kernel = asyncio.Lock()
 
@@ -123,10 +125,35 @@ class ProxiedKernel(Kernel):
     async def get_kernel(self):
         # Ensure that only one coroutine is getting a kernel
         async with self.acquiring_kernel:
-            if self.kernel is None:
-                self.kernel = await self.start_kernel()
+            if self.child_kernel is None:
+                self.child_kernel = await self.start_kernel()
 
-        return self.kernel
+        return self.child_kernel
+
+    async def queue_before_relay(self, stream, ident, parent, config=None):
+        kernel = await self.get_kernel()
+        self.session.send(kernel.shell, parent, ident=ident)
+
+    async def launch_kernel_with_parameters(self, config):
+        # Ensure that only one coroutine is getting a kernel
+        async with self.acquiring_kernel:
+            if self.child_kernel is None:
+                self.child_kernel = await self.start_kernel(config)
+            else:
+                # TODO: Warn the user that they can't change the config on the live kernel
+                self.log.error("kernel already launched")
+                pass
+
+    def parse_cell(self, cell):
+        if not cell.startswith("%%kernel.config"):
+            return None
+
+        # Strip off the config
+        _, raw_config = cell.split("\n", 1)
+
+        # parse the config
+        # TODO: incorporate a yaml parser
+        return raw_config
 
     def relay_execute_to_kernel(self, stream, ident, parent):
         # Check for configuraiton code first
@@ -134,23 +161,27 @@ class ProxiedKernel(Kernel):
         cell = content["code"]
 
         # Check cell for our config
-        # While also checking if this is the first cell run
+        config = self.parse_cell(content["code"])
+        if config:
+            # Launch the kernel with the config to start
+            # However, if the kernel is already started and we see this cell
+            # We need to inform the user
+            asyncio.create_task(self.launch_kernel_with_parameters(config))
+            # TODO: Respond to the execution message since this came from execution...
 
-        content["code"] = cell
-
-        # relay_to_kernel is synchronous, and we rely on an asynchronous start
-        # so we create each kernel message as a task...
-        asyncio.create_task(self.queue_before_relay(stream, ident, parent))
-
-    async def queue_before_relay(self, stream, ident, parent):
-        kernel = await self.get_kernel()
-
-        self.session.send(kernel.shell, parent, ident=ident)
+        else:
+            # Run the code or assume we start the default kernel
+            # relay_to_kernel is synchronous, and we rely on an asynchronous start
+            # so we create each kernel message as a task...
+            asyncio.create_task(self.queue_before_relay(stream, ident, parent))
 
     def relay_to_kernel(self, stream, ident, parent):
         # relay_to_kernel is synchronous, and we rely on an asynchronous start
         # so we create each kernel message as a task...
         asyncio.create_task(self.queue_before_relay(stream, ident, parent))
+
+        # TODO: All non-execution requests prior to the kernel starting up must be queued
+        #       up otherwise they're starting a kernel currently...
 
     execute_request = relay_execute_to_kernel
     inspect_request = relay_to_kernel
