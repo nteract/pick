@@ -14,7 +14,7 @@ from jupyter_client import AsyncKernelManager
 from ipykernel.kernelbase import Kernel
 from ipykernel.kernelapp import IPKernelApp
 
-from .proxy import KernelProxy
+import asyncio
 
 
 banner = """\
@@ -52,6 +52,9 @@ class KernelProxy(object):
 class ProxiedKernel(Kernel):
     implementation = "ProxiedKernel"
     implementation_version = __version__
+
+    banner = "Wrapped Kernel"
+
     # TODO: dynamically send over the underlying kernel's kernel_info_reply later...
     language_info = {"name": "python", "mimetype": ""}
 
@@ -70,6 +73,8 @@ class ProxiedKernel(Kernel):
         # We don't have a kernel yet
         self.kernel = None
 
+        self.acquiring_kernel = asyncio.Lock()
+
     def start(self):
         super().start()
         loop = IOLoop.current()
@@ -77,7 +82,7 @@ class ProxiedKernel(Kernel):
         # TODO: create as an asyncio.Task, register a done callback with error logging
         loop.add_callback(self.relay_iopub_messages)
 
-    async def relay_iopub_message(self):
+    async def relay_iopub_messages(self):
         while True:
             # Get message from our
             msg = await self.iosub.recv_multipart()
@@ -89,7 +94,9 @@ class ProxiedKernel(Kernel):
         base, ext = os.path.splitext(self.parent.connection_file)
         cf = "{base}-child{ext}".format(base=base, ext=ext,)
 
-        # TODO: configurability coming here
+        self.log.debug("start our child kernel")
+
+        # TODO: configurability heads into here
         km = AsyncKernelManager(
             kernel_name="python3",
             # Pass our IPython session as the session for the KernelManager
@@ -100,31 +107,50 @@ class ProxiedKernel(Kernel):
             connection_file=cf,
         )
 
-        # Really start it
-        # TODO: Make sure we're not already starting a kernel...
         await km.start_kernel()
 
         kernel = KernelProxy(manager=km, shell_upstream=self.shell_stream)
         self.iosub.connect(kernel.iopub_url)
 
+        # TODO: Make sure the kernel is really started
+        # This is currently pretend. Our next step is repeatedly checking on
+        # the kernel with kernel_info_requests as well as looking at kernel logs
+        # which we'll be able to use to customize information sent back to the user
+        await asyncio.sleep(3)
+
         return kernel
 
     async def get_kernel(self):
-        # TODO: Use a asyncio lock to ensure that only one has access to starting a kernel
-        if self.kernel is None:
-            self.kernel = await self.start_kernel
+        # Ensure that only one coroutine is getting a kernel
+        async with self.acquiring_kernel:
+            if self.kernel is None:
+                self.kernel = await self.start_kernel()
+
         return self.kernel
 
     def relay_execute_to_kernel(self, stream, ident, parent):
-        # TODO: Leaving as boilerplate for now....
-        # content = parent["content"]
-        # cell = content["code"]
-        kernel = self.get_kernel()
+        # Check for configuraiton code first
+        content = parent["content"]
+        cell = content["code"]
+
+        # Check cell for our config
+        # While also checking if this is the first cell run
+
+        content["code"] = cell
+
+        # relay_to_kernel is synchronous, and we rely on an asynchronous start
+        # so we create each kernel message as a task...
+        asyncio.create_task(self.queue_before_relay(stream, ident, parent))
+
+    async def queue_before_relay(self, stream, ident, parent):
+        kernel = await self.get_kernel()
+
         self.session.send(kernel.shell, parent, ident=ident)
 
     def relay_to_kernel(self, stream, ident, parent):
-        kernel = self.get_kernel()
-        self.session.send(kernel.shell, parent, ident=ident)
+        # relay_to_kernel is synchronous, and we rely on an asynchronous start
+        # so we create each kernel message as a task...
+        asyncio.create_task(self.queue_before_relay(stream, ident, parent))
 
     execute_request = relay_execute_to_kernel
     inspect_request = relay_to_kernel
@@ -133,8 +159,12 @@ class ProxiedKernel(Kernel):
 
 class ProxyKernelApp(IPKernelApp):
     kernel_class = ProxiedKernel
-    # TODO: Should we disable IO Capture?
-    outstream_class = None
+    # TODO: Uncomment this to disable IO Capture of this kernel
+    # outstream_class = None
+
+    def _log_level_default(self):
+        # Turn on debug logs while we hack on this
+        return 10
 
 
 main = ProxyKernelApp.launch_instance
