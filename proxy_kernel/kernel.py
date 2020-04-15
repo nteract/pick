@@ -160,6 +160,32 @@ class ProxiedKernel(Kernel):
             ident=self._topic("display_data"),
         )
 
+    async def launch_or_reuse_kernel(self, strema, ident, parent):
+        # Ensure that only one coroutine is getting a kernel
+        async with self.acquiring_kernel:
+            if self.child_kernel is None:
+                kernel_display_id = hexlify(os.urandom(8)).decode("ascii")
+
+                self._publish_display_data(
+                    {u"text/markdown": u"Preparing default kernel..."},
+                    transient={u"display_id": kernel_display_id},
+                    parent=parent,
+                )
+                # NOTE: this is the default kernel launch with no config passed
+                self.child_kernel = await self.start_kernel()
+                self._publish_display_data(
+                    # Wipe out the previous message
+                    {u"text/markdown": ""},
+                    transient={u"display_id": kernel_display_id},
+                    parent=parent,
+                    update=True,
+                )
+            else:
+                # We can just assume to pass the child kernel at this point
+                pass
+
+        self.session.send(self.child_kernel.shell, parent, ident=ident)
+
     async def launch_kernel_with_parameters(self, stream, ident, parent, config):
 
         content = parent[u"content"]
@@ -169,8 +195,6 @@ class ProxiedKernel(Kernel):
         self._publish_status(u"busy")
 
         kernel_display_id = hexlify(os.urandom(8)).decode("ascii")
-
-        self.log.debug("launching", kernel_display_id)
 
         self._publish_display_data(
             {u"text/markdown": u"Launching customized runtime..."},
@@ -261,7 +285,7 @@ you want to change configuration.
             # Run the code or assume we start the default kernel
             # relay_to_kernel is synchronous and we rely on an asynchronous start
             # so we create each kernel message as a task...
-            asyncio.create_task(self.queue_before_relay(stream, ident, parent))
+            asyncio.create_task(self.launch_or_reuse_kernel(stream, ident, parent))
 
     def relay_to_kernel(self, stream, ident, parent):
         # relay_to_kernel is synchronous, and we rely on an asynchronous start
