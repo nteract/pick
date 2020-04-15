@@ -6,6 +6,7 @@ from tornado.ioloop import IOLoop
 import zmq
 from zmq.eventloop import ioloop
 
+import base64
 
 from binascii import hexlify
 import os
@@ -113,8 +114,30 @@ class ProxiedKernel(Kernel):
             # Use the same ZeroMQ context that allows for awaiting on recv
             context=self.future_context,
             connection_file=cf,
+            # TODO: Figure out if this can be relied on
+            # extra_arguments=["-c", "x = 89898977"],
+            # extra_env={},
         )
 
+        # Due to how kernel_cmd is no longer in vogue, we have to set
+        # this extra field that just plain has to be set
+        km.extra_env = {}
+
+        if config is None:
+            config = ""
+
+        self.log.info("config setting time")
+
+        km.kernel_cmd = [
+            "python3",
+            "-m",
+            "ipykernel_launcher",
+            "-f",
+            "{connection_file}",
+            "-c",
+            f"""the_config = '''{config}''';""",
+        ]
+        self.log.info(km.kernel_cmd)
         await km.start_kernel()
 
         kernel = KernelProxy(manager=km, shell_upstream=self.shell_stream)
@@ -154,11 +177,11 @@ class ProxiedKernel(Kernel):
         if transient is None:
             transient = {}
 
-        content = {u"data": data, u"metadata": metadata, u"transient": transient}
+        content = {"data": data, "metadata": metadata, "transient": transient}
 
         self.session.send(
             self.iopub_socket,
-            u"update_display_data" if update else u"display_data",
+            "update_display_data" if update else "display_data",
             content,
             parent=parent,
             ident=self._topic("display_data"),
@@ -171,16 +194,17 @@ class ProxiedKernel(Kernel):
                 kernel_display_id = hexlify(os.urandom(8)).decode("ascii")
 
                 self._publish_display_data(
-                    {u"text/markdown": u"Preparing default kernel..."},
-                    transient={u"display_id": kernel_display_id},
+                    {"text/markdown": "Preparing default kernel..."},
+                    transient={"display_id": kernel_display_id},
                     parent=parent,
                 )
+
                 # NOTE: this is the default kernel launch with no config passed
                 self.child_kernel = await self.start_kernel()
                 self._publish_display_data(
                     # Wipe out the previous message
-                    {u"text/markdown": ""},
-                    transient={u"display_id": kernel_display_id},
+                    {"text/markdown": ""},
+                    transient={"display_id": kernel_display_id},
                     parent=parent,
                     update=True,
                 )
@@ -191,17 +215,17 @@ class ProxiedKernel(Kernel):
         self.session.send(self.child_kernel.shell, parent, ident=ident)
 
     async def launch_kernel_with_parameters(self, stream, ident, parent, config):
-        content = parent[u"content"]
-        code = content[u"code"]
+        content = parent["content"]
+        code = content["code"]
         # NOTE: We are, for the time being, ignoring the silent flag, store_history, etc.
         self._publish_execute_input(code, parent, self.execution_count)
-        self._publish_status(u"busy")
+        self._publish_status("busy")
 
         kernel_display_id = hexlify(os.urandom(8)).decode("ascii")
 
         self._publish_display_data(
-            {u"text/markdown": u"Launching customized runtime..."},
-            transient={u"display_id": kernel_display_id},
+            {"text/markdown": "Launching customized runtime..."},
+            transient={"display_id": kernel_display_id},
             parent=parent,
         )
 
@@ -210,15 +234,15 @@ class ProxiedKernel(Kernel):
             if self.child_kernel is None:
                 self.child_kernel = await self.start_kernel(config)
                 self._publish_display_data(
-                    {u"text/markdown": u"Runtime ready!"},
-                    transient={u"display_id": kernel_display_id},
+                    {"text/markdown": "Runtime ready!"},
+                    transient={"display_id": kernel_display_id},
                     parent=parent,
                     update=True,
                 )
             else:
                 self._publish_display_data(
                     {
-                        u"text/markdown": u"""
+                        "text/markdown": """
 ## Kernel already configured and launched.
 
 You can only run the `%%kernel.config` cell at the top of your notebook and the
@@ -226,7 +250,7 @@ start of your session. Please **restart your kernel** and run the cell again if
 you want to change configuration.
 """
                     },
-                    transient={u"display_id": kernel_display_id},
+                    transient={"display_id": kernel_display_id},
                     parent=parent,
                     update=True,
                 )
@@ -234,25 +258,25 @@ you want to change configuration.
         # Complete the "execution request" so the jupyter client (e.g. the notebook) thinks
         # execution is finished
         reply_content = {
-            u"status": u"ok",
+            "status": "ok",
             # TODO: Adjust this since we're one step behind the "real" kernel
-            u"execution_count": self.execution_count,
+            "execution_count": self.execution_count,
             # Note: user_expressions are not supported on our kernel creation magic
-            u"user_expressions": {},
-            u"payload": {},
+            "user_expressions": {},
+            "payload": {},
         }
 
-        metadata = {u"parametrized-kernel": True, u"status": reply_content["status"]}
+        metadata = {"parametrized-kernel": True, "status": reply_content["status"]}
 
         self.session.send(
             stream,
-            u"execute_reply",
+            "execute_reply",
             reply_content,
             parent,
             metadata=metadata,
             ident=ident,
         )
-        self._publish_status(u"idle")
+        self._publish_status("idle")
 
     def parse_cell(self, cell):
         if not cell.startswith("%%kernel.config"):
