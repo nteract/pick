@@ -31,7 +31,6 @@ Proxies to another kernel, launched underneath
 __version__ = "0.1"
 
 
-# TODO: Investigate a re-write...
 class KernelProxy(object):
     """A proxy for a single kernel
 
@@ -125,8 +124,8 @@ class ProxiedKernel(Kernel):
         #       at the kernel logs. We can use both of those to customize
         #       the information we send back to the user.
         #
-        # For now, we'll pretend the kernel takes 3 seconds to start
-        await asyncio.sleep(3)
+        # For now, we'll pretend the kernel takes 1.5 seconds to start
+        await asyncio.sleep(1.5)
 
         return kernel
 
@@ -142,56 +141,10 @@ class ProxiedKernel(Kernel):
         kernel = await self.get_kernel()
         self.session.send(kernel.shell, parent, ident=ident)
 
-    async def publish_display_data(
-        self,
-        stream,
-        ident,
-        parent,
-        data,
-        metadata=None,
-        source=None,
-        transient=None,
-        update=False,
-    ):
-        parent_header = extract_header(parent)
-        topic = "display_data"
-
-        if metadata is None:
-            metadata = {}
-        if transient is None:
-            transient = {}
-
-        # self._validate_data(data, metadata)
-        content = {}
-        # TODO TODO TODO define
-        # content["data"] = encode_images(data)
-        content["data"] = data
-        content["metadata"] = metadata
-        content["transient"] = transient
-
-        msg_type = "update_display_data" if update else "display_data"
-
-        # Use 2-stage process to send a message,
-        # in order to put it through the transform
-        # hooks before potentially sending.
-        msg = self.session.msg(msg_type, json_clean(content), parent=parent_header)
-
-        # Each transform either returns a new
-        # message or None. If None is returned,
-        # the message has been 'used' and we return.
-        # for hook in self._hooks:
-        #     msg = hook(msg)
-        #     if msg is None:
-        #         return
-
-        self.session.send(
-            self.iopub_socket, msg, ident=topic,
-        )
-
     def _publish_display_data(
         self, data, metadata=None, transient=None, parent=None, update=False
     ):
-        """send status (busy/idle) on IOPub"""
+        """publish display data"""
         if metadata is None:
             metadata = {}
         if transient is None:
@@ -211,7 +164,7 @@ class ProxiedKernel(Kernel):
 
         content = parent[u"content"]
         code = content[u"code"]
-        # TODO: Determine if we care about the silent flag, store_history, etc.
+        # NOTE: We are, for the time being, ignoring the silent flag, store_history, etc.
         self._publish_execute_input(code, parent, self.execution_count)
         self._publish_status(u"busy")
 
