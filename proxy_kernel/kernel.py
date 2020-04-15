@@ -6,13 +6,20 @@ from tornado.ioloop import IOLoop
 import zmq
 from zmq.eventloop import ioloop
 
+
+from binascii import hexlify
+import os
+
 ioloop.install()
 # Rely on Socket subclass that returns Futures for recv*
 from zmq.eventloop.future import Context
 
 from jupyter_client import AsyncKernelManager
+from jupyter_client.session import extract_header
 from ipykernel.kernelbase import Kernel
 from ipykernel.kernelapp import IPKernelApp
+
+from ipykernel.jsonutil import json_clean
 
 import asyncio
 
@@ -135,12 +142,88 @@ class ProxiedKernel(Kernel):
         kernel = await self.get_kernel()
         self.session.send(kernel.shell, parent, ident=ident)
 
+    async def publish_display_data(
+        self,
+        stream,
+        ident,
+        parent,
+        data,
+        metadata=None,
+        source=None,
+        transient=None,
+        update=False,
+    ):
+        parent_header = extract_header(parent)
+        topic = "display_data"
+
+        if metadata is None:
+            metadata = {}
+        if transient is None:
+            transient = {}
+
+        # self._validate_data(data, metadata)
+        content = {}
+        # TODO TODO TODO define
+        # content["data"] = encode_images(data)
+        content["data"] = data
+        content["metadata"] = metadata
+        content["transient"] = transient
+
+        msg_type = "update_display_data" if update else "display_data"
+
+        # Use 2-stage process to send a message,
+        # in order to put it through the transform
+        # hooks before potentially sending.
+        msg = self.session.msg(msg_type, json_clean(content), parent=parent_header)
+
+        # Each transform either returns a new
+        # message or None. If None is returned,
+        # the message has been 'used' and we return.
+        # for hook in self._hooks:
+        #     msg = hook(msg)
+        #     if msg is None:
+        #         return
+
+        self.session.send(
+            self.iopub_socket, msg, ident=topic,
+        )
+
+    def _publish_display_data(
+        self, data, metadata=None, transient=None, parent=None, update=False
+    ):
+        """send status (busy/idle) on IOPub"""
+        if metadata is None:
+            metadata = {}
+        if transient is None:
+            transient = {}
+
+        content = {u"data": data, u"metadata": metadata, u"transient": transient}
+
+        self.session.send(
+            self.iopub_socket,
+            u"update_display_data" if update else u"display_data",
+            content,
+            parent=parent,
+            ident=self._topic("display_data"),
+        )
+
     async def launch_kernel_with_parameters(self, stream, ident, parent, config):
+
         content = parent[u"content"]
         code = content[u"code"]
         # TODO: Determine if we care about the silent flag, store_history, etc.
         self._publish_execute_input(code, parent, self.execution_count)
         self._publish_status(u"busy")
+
+        kernel_display_id = hexlify(os.urandom(8)).decode("ascii")
+
+        self.log.debug("launching", kernel_display_id)
+
+        self._publish_display_data(
+            {u"text/markdown": u"Launching customized runtime..."},
+            transient={u"display_id": kernel_display_id},
+            parent=parent,
+        )
 
         # Ensure that only one coroutine is getting a kernel
         # Functionally similar to get_kernel except it passes config
@@ -148,17 +231,34 @@ class ProxiedKernel(Kernel):
         async with self.acquiring_kernel:
             if self.child_kernel is None:
                 self.child_kernel = await self.start_kernel(config)
+                self._publish_display_data(
+                    {u"text/markdown": u"Runtime ready!"},
+                    transient={u"display_id": kernel_display_id},
+                    parent=parent,
+                    update=True,
+                )
             else:
-                # TODO: Warn the user that they can't change the config on the live kernel
-                self.log.error("kernel already launched")
-                pass
+                self._publish_display_data(
+                    {
+                        u"text/markdown": u"""
+## Kernel already configured and launched.
+
+You can only run the `%%kernel.config` cell at the top of your notebook.
+Please **restart your kernel** and run the cell again if you want to change
+configuration.
+"""
+                    },
+                    transient={u"display_id": kernel_display_id},
+                    parent=parent,
+                    update=True,
+                )
 
         # Complete the "execution request" so the jupyter client (e.g. the notebook) thinks
         # execution is finished
         reply_content = {
             u"status": u"ok",
             # TODO: Adjust this since we're one step behind the "real" kernel
-            u"execution_count": 0,
+            u"execution_count": self.execution_count,
             # Note: user_expressions are not supported on our kernel creation magic
             u"user_expressions": {},
             u"payload": {},
