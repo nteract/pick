@@ -196,9 +196,9 @@ class ProxiedKernel(Kernel):
                         u"text/markdown": u"""
 ## Kernel already configured and launched.
 
-You can only run the `%%kernel.config` cell at the top of your notebook.
-Please **restart your kernel** and run the cell again if you want to change
-configuration.
+You can only run the `%%kernel.config` cell at the top of your notebook and the
+start of your session. Please **restart your kernel** and run the cell again if
+you want to change configuration.
 """
                     },
                     transient={u"display_id": kernel_display_id},
