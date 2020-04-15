@@ -136,8 +136,6 @@ class ProxiedKernel(Kernel):
         self.session.send(kernel.shell, parent, ident=ident)
 
     async def launch_kernel_with_parameters(self, stream, ident, parent, config):
-        self.log.debug(dir(self))
-
         content = parent[u"content"]
         code = content[u"code"]
         # TODO: Determine if we care about the silent flag, store_history, etc.
@@ -203,11 +201,12 @@ class ProxiedKernel(Kernel):
             asyncio.create_task(
                 self.launch_kernel_with_parameters(stream, ident, parent, config)
             )
-            # TODO: Respond to the execution message since this came from execution...
+            # NOTE: We respond to the execution message in the above task
+            return
 
         else:
             # Run the code or assume we start the default kernel
-            # relay_to_kernel is synchronous, and we rely on an asynchronous start
+            # relay_to_kernel is synchronous and we rely on an asynchronous start
             # so we create each kernel message as a task...
             asyncio.create_task(self.queue_before_relay(stream, ident, parent))
 
