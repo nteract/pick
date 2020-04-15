@@ -82,6 +82,7 @@ class ProxiedKernel(Kernel):
         self.kernel_config = None
 
         self.acquiring_kernel = asyncio.Lock()
+        self.kernel_launched = asyncio.Event()
 
     def start(self):
         super().start()
@@ -127,13 +128,16 @@ class ProxiedKernel(Kernel):
         # For now, we'll pretend the kernel takes 1.5 seconds to start
         await asyncio.sleep(1.5)
 
+        # Inform all waiters for the kernel that it is ready
+        self.kernel_launched.set()
+
         return kernel
 
     async def get_kernel(self):
-        # Ensure that only one coroutine is getting a kernel
-        async with self.acquiring_kernel:
-            if self.child_kernel is None:
-                self.child_kernel = await self.start_kernel()
+        # Ensure that the kernel is launched
+        await self.kernel_launched.wait()
+        if self.child_kernel is None:
+            self.log.error("the child kernel was not available")
 
         return self.child_kernel
 
@@ -187,7 +191,6 @@ class ProxiedKernel(Kernel):
         self.session.send(self.child_kernel.shell, parent, ident=ident)
 
     async def launch_kernel_with_parameters(self, stream, ident, parent, config):
-
         content = parent[u"content"]
         code = content[u"code"]
         # NOTE: We are, for the time being, ignoring the silent flag, store_history, etc.
@@ -203,8 +206,6 @@ class ProxiedKernel(Kernel):
         )
 
         # Ensure that only one coroutine is getting a kernel
-        # Functionally similar to get_kernel except it passes config
-        # and errors when the kernel is already launched
         async with self.acquiring_kernel:
             if self.child_kernel is None:
                 self.child_kernel = await self.start_kernel(config)
