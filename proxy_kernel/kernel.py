@@ -57,13 +57,27 @@ class KernelProxy(object):
 
 
 class ProxiedKernel(Kernel):
-    implementation = "ProxiedKernel"
+    implementation = "picky"
     implementation_version = __version__
 
-    banner = "Wrapped Kernel"
+    # This banner only shows on `jupyter console` (at the command line).
+    banner = """Pick, the kernel for choosy users! ⛏ 
 
-    # TODO: dynamically send over the underlying kernel's kernel_info_reply later...
-    language_info = {"name": "python", "mimetype": ""}
+Read more about it at https://github.com/rgbkrk/pick
+    """
+
+    # NOTE: This may not match the underlying kernel we launch. However, we need a default
+    #       for the initial launch.
+    # TODO: Dynamically send over the underlying kernel's kernel_info_reply later
+    language_info = {
+        "name": "python",
+        "version": sys.version.split()[0],
+        "mimetype": "text/x-python",
+        "codemirror_mode": {"name": "ipython", "version": sys.version_info[0]},
+        "pygments_lexer": "ipython3",
+        "nbconvert_exporter": "python",
+        "file_extension": ".py",
+    }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -329,10 +343,6 @@ class ProxyKernelApp(IPKernelApp):
     kernel_class = ProxiedKernel
     # TODO: Uncomment this to disable IO Capture of this kernel
     # outstream_class = None
-
-    def _log_level_default(self):
-        # Turn on debug logs while we hack on this
-        return 10
 
 
 main = ProxyKernelApp.launch_instance
