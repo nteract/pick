@@ -19,6 +19,12 @@ setuptools.setup(
             "pick-install=pick_kernel.kernelspec:main",
         ]
     },
+    install_requires=[
+        "ipykernel>=5.2.1",
+        "jupyter_client>=6.1.3",
+        "tornado>=4.2",
+        "pyzmq>=19.0.0",
+    ],
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
