@@ -56,7 +56,7 @@ class KernelProxy(object):
             self.shell_upstream.send_multipart(msg)
 
 
-class ProxiedKernel(Kernel):
+class PickyKernel(Kernel):
     implementation = "picky"
     implementation_version = __version__
 
@@ -339,10 +339,10 @@ you want to change configuration.
     complete_request = relay_to_kernel
 
 
-class ProxyKernelApp(IPKernelApp):
-    kernel_class = ProxiedKernel
+class PickyKernelApp(IPKernelApp):
+    kernel_class = PickyKernel
     # TODO: Uncomment this to disable IO Capture of this kernel
     # outstream_class = None
 
 
-main = ProxyKernelApp.launch_instance
+main = PickyKernelApp.launch_instance
