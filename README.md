@@ -21,5 +21,5 @@ pip3 install -e .
 Create the kernelspec
 
 ```
-pick-install
+pick-install --user
 ```
