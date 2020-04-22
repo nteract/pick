@@ -11,6 +11,8 @@ import base64
 from binascii import hexlify
 import os
 
+from queue import Empty
+
 ioloop.install()
 # Rely on Socket subclass that returns Futures for recv*
 from zmq.eventloop.future import Context
@@ -118,8 +120,6 @@ Read more about it at https://github.com/rgbkrk/pick
         base, ext = os.path.splitext(self.parent.connection_file)
         cf = "{base}-child{ext}".format(base=base, ext=ext,)
 
-        self.log.debug("start our child kernel")
-
         # TODO: pass config into kernel launch
         km = AsyncKernelManager(
             kernel_name="python3",
@@ -140,8 +140,6 @@ Read more about it at https://github.com/rgbkrk/pick
         if config is None:
             config = ""
 
-        self.log.info("config setting time")
-
         km.kernel_cmd = [
             "python3",
             "-m",
@@ -151,19 +149,60 @@ Read more about it at https://github.com/rgbkrk/pick
             "-c",
             f"""the_config = '''{config}''';""",
         ]
+        self.log.info("launching child kernel with")
         self.log.info(km.kernel_cmd)
+
         await km.start_kernel()
 
         kernel = KernelProxy(manager=km, shell_upstream=self.shell_stream)
         self.iosub.connect(kernel.iopub_url)
 
-        # TODO: Make sure the kernel is really started
-        #       We can do that using kernel_info_requests as well as looking
-        #       at the kernel logs. We can use both of those to customize
-        #       the information we send back to the user.
+        # Make sure the kernel is really started. We do that by using
+        # kernel_info_requests here.
         #
-        # For now, we'll pretend the kernel takes 1.5 seconds to start
-        await asyncio.sleep(1.5)
+        # In the future we should incorporate kernel logs (output of the kernel process), then
+        # and send back all the information back to the user as display output.
+
+        # Create a temporary KernelClient for waiting for the kernel to start
+        kc = km.client()
+        kc.start_channels()
+
+        # Wait for kernel info reply on shell channel
+        while True:
+            self.log.debug("querying kernel info")
+            kc.kernel_info(reply=False)
+            try:
+                msg = await kc.shell_channel.get_msg(timeout=1)
+            except Empty:
+                pass
+            else:
+                if msg["msg_type"] == "kernel_info_reply":
+                    # Now we know the kernel is (mostly) ready.
+                    # However, most kernels are not quite ready at this point to send
+                    # on more execution.
+                    #
+                    # Do we wait for a further status: idle on iopub?
+                    # Wait for idle?
+                    # Wait for particular logs from the stdout of the kernel process?
+                    break
+
+            if not await kc.is_alive():
+                # TODO: Emit child kernel death message into the notebook output
+                raise RuntimeError("Kernel died before replying to kernel_info")
+                self.log.error("Kernel died while launching")
+
+            # Wait before sending another kernel info request
+            await asyncio.sleep(0.1)
+
+        # Flush IOPub channel on our (temporary) kernel client
+        while True:
+            try:
+                msg = await kc.iopub_channel.get_msg(timeout=0.2)
+            except Empty:
+                break
+
+        # Clean up our temporary kernel client
+        kc.stop_channels()
 
         # Inform all waiters for the kernel that it is ready
         self.kernel_launched.set()
@@ -293,15 +332,16 @@ you want to change configuration.
         self._publish_status("idle")
 
     def parse_cell(self, cell):
-        if not cell.startswith("%%kernel.config"):
+        if not cell.startswith("%%kernel."):
             return None
 
-        # Strip off the config
-        _, raw_config = cell.split("\n", 1)
+        try:
+            # Split off our config from the kernel magic name
+            _, raw_config = cell.split("\n", 1)
 
-        # parse the config
-        # TODO: incorporate a yaml parser
-        return raw_config
+            return raw_config
+        except Exception:
+            return None
 
     def relay_execute_to_kernel(self, stream, ident, parent):
         # Check for configuraiton code first
