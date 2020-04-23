@@ -26,7 +26,7 @@ pick-install --user
 
 ## Purpose & Background
 
-We want a way to launch resources in the background that a kernel needs and inform the user when the kernel is ready. A few examples of this are creating a conda environment, launching a spark cluster, or running an ipython kernel inside of a conda environment.
+When working in a notebook, we want a way to choose resources to launch in the background, create a kernel environment, and inform the user when the kernel and custom resources are ready.  Creating a conda environment, launching a spark cluster, or running an ipython kernel inside of a conda environment are examples of things we wanted to do from within a notebook.
 
 At first, we wanted to take the approach of changing the Jupyter APIs to allow setting additional parameters on launch. This would have required changes at the `/api/kernelspecs`, `/api/kernel`, each of the UIs, and even the way that kernels are launched by the notebook server, jupyter client, jupyter console, and papermill.
 
