@@ -2,6 +2,8 @@
 
 Customize your kernels on launch!
 
+**Pick**'s magic lets you customize your virtual environments, conda environments, and Jupyter kernels. If you have mountains of data or models, you can use Pick to easily climb to peak efficiency -- composable, on-the-fly environments and kernels created within a notebook cell.
+
 _Not ready for wide installation yet. If you're ready to try it out, start with the development version detailed below._
 
 ## Requirements
@@ -26,11 +28,13 @@ pick-install --user
 
 ## Purpose & Background
 
-When working in a notebook, we want a way to choose resources to launch in the background, create a kernel environment, and inform the user when the kernel and custom resources are ready.  Creating a conda environment, launching a spark cluster, or running an ipython kernel inside of a conda environment are examples of things we wanted to do from within a notebook.
+When working in a notebook, we want a way to choose resources to launch in the background, create a kernel environment, and inform the user when the kernel and custom resources are ready. Creating a conda environment, launching a spark cluster, or running an ipython kernel inside of a conda environment are examples of things we wanted to do from within a notebook.
 
-At first, we wanted to take the approach of changing the Jupyter APIs to allow setting additional parameters on launch. This would have required changes at the `/api/kernelspecs`, `/api/kernel`, each of the UIs, and even the way that kernels are launched by the notebook server, jupyter client, jupyter console, and papermill.
+When we were looking at initial design, we considered the approach of changing the Jupyter APIs to allow setting additional parameters on launch. This would have required changes at the `/api/kernelspecs`, `/api/kernel`, each of the UIs, and even the way that kernels are launched by the notebook server, jupyter client, jupyter console, and papermill. Possible, but we wanted something simpler for notebook users and developers.
 
-Instead, we're taking the approach of using a kernel magic, in the style of other cell magics. As an example, here's a kernel magic for creating a kernel that uses a conda environment:
+Instead, we decided to use magic -- kernel magic. In the style of other cell magics, we wanted Pick to give users a flexible kernel magic in a notebook cell.
+
+As an example, here's a kernel magic for creating a kernel that uses a conda environment:
 
 ```
 %%kernel.conda-environment
@@ -54,14 +58,14 @@ In action, it works like this:
 
 ![image](https://user-images.githubusercontent.com/836375/80048778-0164dd80-84c6-11ea-8d6c-a90ec45aefcc.png)
 
-While the underlying kernel is still getting ready, logs are emitted to the frontend and the UI is still responsive.
+While Pick is working to get the magic's underlying kernel ready, Pick emits logs to the frontend and keeps the notebook UI responsive.
 
-The same can be done with setting up spark and its associated environment variables in advance of launching the ipython kernel, or other more creative ways of starting a kernel from an environment.
+A similar example with Pick and kernel magics includes setting up spark and its associated environment variables in advance of launching the ipython kernel. Pick opens up possibilities for other creative ways of starting a kernel from an environment.
 
 ## Truth: It's a kernel proxy!
 
-The design here is intended to make it really easy for a user to configure a kernel without having to mess with extensions across all the myriad jupyter projects. Instead it's a regular kernel that manages a "child" kernel underneath it.
+Pick's design focuses on making it really easy for a user to configure a kernel without having to mess with extensions across all the myriad jupyter projects or executing tasks from the command line. Pick works as a regular Jupyter kernel with the additional ability to create, customize, and manage a "child" kernel.
 
-We set up the initial communications protocol with the jupyter client, whether that be the notebook server or papermill, then after the `%%kernel.*` magic is run we launch the "real" kernel.
+We set up Pick's initial communications protocol with the jupyter client, whether that be the notebook server or papermill. Next, the `%%kernel.*` magic runs, and we launch the "real" kernel.
 
 ![image](https://user-images.githubusercontent.com/836375/80049663-5b66a280-84c8-11ea-8b21-b1be6481b053.png)
