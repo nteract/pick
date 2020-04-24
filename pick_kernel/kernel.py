@@ -52,7 +52,7 @@ class KernelProxy(object):
 
 
 class PickyKernel(Kernel):
-    """A kernel adding the kernel magic and configuration of environments"""
+    """A kernel that accepts kernel magics which configure the environment"""
     implementation = "picky"
     implementation_version = __version__
 
@@ -109,6 +109,7 @@ Read more about it at https://github.com/nteract/pick
         """
         while True:
             msg = await self.iosub.recv_multipart()
+            # Send the message up to the consumer (for example, the notebook)
             self.iopub_socket.send_multipart(msg)
 
     async def start_kernel(self, config=None):
@@ -378,7 +379,7 @@ you want to change configuration.
 
 
 class PickyKernelApp(IPKernelApp):
-    """A kernel application for starting a `PickyKernel`, an IPython based kernel."""
+    """A kernel application for starting a `PickyKernel`, a proxying kernel with options."""
     kernel_class = PickyKernel
     # TODO: Uncomment this to disable IO Capture of this kernel
     # outstream_class = None
