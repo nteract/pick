@@ -1,31 +1,24 @@
+import asyncio
+import base64
 import os
 import sys
-
-from tornado.ioloop import IOLoop
-
-import zmq
-from zmq.eventloop import ioloop
-
-import base64
-
 from binascii import hexlify
-import os
-
 from queue import Empty
 
-ioloop.install()
+from tornado.ioloop import IOLoop
+import zmq
+from zmq.eventloop import ioloop
 # Rely on Socket subclass that returns Futures for recv*
 from zmq.eventloop.future import Context
 
-from jupyter_client import AsyncKernelManager
-from jupyter_client.session import extract_header
+from ipykernel.jsonutil import json_clean
 from ipykernel.kernelbase import Kernel
 from ipykernel.kernelapp import IPKernelApp
+from jupyter_client import AsyncKernelManager
+from jupyter_client.session import extract_header
 
-from ipykernel.jsonutil import json_clean
-
-import asyncio
-
+# Install the zmq event loop
+ioloop.install()
 
 banner = """\
 Proxies to another kernel, launched underneath
@@ -37,9 +30,9 @@ __version__ = "0.1"
 class KernelProxy(object):
     """A proxy for a single kernel
 
-    Hooks up relay of messages on the shell channel.
+    The kernel's `shell` channel is used for request/reply calls to the kernel.
+    The `KernelProxy` hooks up relay of messages on the shell channel.
     """
-
     def __init__(self, manager, shell_upstream):
         self.manager = manager
         # TODO: Connect Control & STDIN
@@ -59,13 +52,14 @@ class KernelProxy(object):
 
 
 class PickyKernel(Kernel):
+    """A kernel adding the kernel magic and configuration of environments"""
     implementation = "picky"
     implementation_version = __version__
 
     # This banner only shows on `jupyter console` (at the command line).
     banner = """Pick, the kernel for choosy users! ⛏ 
 
-Read more about it at https://github.com/rgbkrk/pick
+Read more about it at https://github.com/nteract/pick
     """
 
     # NOTE: This may not match the underlying kernel we launch. However, we need a default
@@ -90,7 +84,7 @@ Read more about it at https://github.com/rgbkrk/pick
         self.iosub = ctx.socket(zmq.SUB)
         self.iosub.subscribe = b""
 
-        # From kernelapp.py, shell_streams is typically shell_stream, control_stream
+        # From kernelapp.py, shell_streams are typically shell_stream, control_stream
         self.shell_stream = self.shell_streams[0]
 
         # Start with no child kernel
@@ -102,6 +96,7 @@ Read more about it at https://github.com/rgbkrk/pick
         self.kernel_launched = asyncio.Event()
 
     def start(self):
+        """Start the PickyKernel and its event loop"""
         super().start()
         loop = IOLoop.current()
         # Collect and send all IOPub messages, for all time
@@ -109,10 +104,11 @@ Read more about it at https://github.com/rgbkrk/pick
         loop.add_callback(self.relay_iopub_messages)
 
     async def relay_iopub_messages(self):
+        """Relay messages received by the Picky Kernel
+           to the consumer client (e.g. notebook)
+        """
         while True:
-            # Get message from our
             msg = await self.iosub.recv_multipart()
-            # Send the message up to our consumer (e.g. notebook)
             self.iopub_socket.send_multipart(msg)
 
     async def start_kernel(self, config=None):
@@ -210,6 +206,7 @@ Read more about it at https://github.com/rgbkrk/pick
         return kernel
 
     async def get_kernel(self):
+        """Get a launched child kernel"""
         # Ensure that the kernel is launched
         await self.kernel_launched.wait()
         if self.child_kernel is None:
@@ -218,6 +215,7 @@ Read more about it at https://github.com/rgbkrk/pick
         return self.child_kernel
 
     async def queue_before_relay(self, stream, ident, parent):
+        """Queue messages before sending between the child and parent kernels."""
         kernel = await self.get_kernel()
         self.session.send(kernel.shell, parent, ident=ident)
 
@@ -240,7 +238,7 @@ Read more about it at https://github.com/rgbkrk/pick
             ident=self._topic("display_data"),
         )
 
-    async def launch_or_reuse_kernel(self, strema, ident, parent):
+    async def launch_or_reuse_kernel(self, stream, ident, parent):
         # Ensure that only one coroutine is getting a kernel
         async with self.acquiring_kernel:
             if self.child_kernel is None:
@@ -380,6 +378,7 @@ you want to change configuration.
 
 
 class PickyKernelApp(IPKernelApp):
+    """A kernel application for starting a `PickyKernel`, an IPython based kernel."""
     kernel_class = PickyKernel
     # TODO: Uncomment this to disable IO Capture of this kernel
     # outstream_class = None

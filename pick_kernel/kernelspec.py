@@ -8,19 +8,18 @@ import sys
 import tempfile
 
 from jupyter_client.kernelspec import KernelSpecManager
+from ipykernel import kernelspec as ipyks
 
 pjoin = os.path.join
 
-KERNEL_NAME = "picky-python%i" % sys.version_info[0]
-
-from ipykernel import kernelspec as ipyks
+KERNEL_NAME = f"picky-python{sys.version_info[0]}"
 
 # Yoink resources from the IPython kernel's resources
 RESOURCES = pjoin(os.path.dirname(ipyks.__file__), "resources")
 
 
 def make_pick_kernel_cmd(
-    mod="pick_kernel", executable=None, extra_arguments=None, **kw
+    mod="pick_kernel", executable=None, extra_arguments=None, **kwargs
 ):
     """Build Popen command list for launching a Picky kernel.
 
@@ -55,7 +54,7 @@ def get_kernel_dict(extra_arguments=None):
     """Construct dict for kernel.json"""
     return {
         "argv": make_pick_kernel_cmd(extra_arguments=extra_arguments),
-        "display_name": "Picky Python %i" % sys.version_info[0],
+        "display_name": f"Picky Python {sys.version_info[0]}",
         "language": "python",
     }
 
@@ -63,10 +62,10 @@ def get_kernel_dict(extra_arguments=None):
 def write_kernel_spec(path=None, overrides=None, extra_arguments=None):
     """Write a kernel spec directory to `path`
     
-    If `path` is not specified, a temporary directory is created.
-    If `overrides` is given, the kernelspec JSON is updated before writing.
+    - If `path` is not specified, a temporary directory is created.
+    - If `overrides` is given, the kernelspec JSON is updated before writing.
     
-    The path to the kernelspec is always returned.
+    Always returns the `path` to the `kernelspec`.
     """
     if path is None:
         path = os.path.join(tempfile.mkdtemp(suffix="_kernels"), KERNEL_NAME)
@@ -103,12 +102,13 @@ def install(
         Whether to do a user-only install, or system-wide.
     kernel_name: str, optional
         Specify a name for the kernelspec.
-        This is needed for having multiple Picky kernels for different environments.
+        Names are needed to have multiple Picky kernels for different environments.
     display_name: str, optional
         Specify the display name for the kernelspec
     prefix: str, optional
         Specify an install prefix for the kernelspec.
-        This is needed to install into a non-default location, such as a conda/virtual-env.
+        This is needed to install into a non-default location,
+        such as a conda or a virtual environment.
 
     Returns
     -------
@@ -131,7 +131,7 @@ def install(
     dest = kernel_spec_manager.install_kernel_spec(
         path, kernel_name=kernel_name, user=user, prefix=prefix
     )
-    # cleanup afterward
+    # cleanup the temporary path afterward
     shutil.rmtree(path)
     return dest
 
@@ -186,8 +186,8 @@ class InstallPickyKernelSpecApp(Application):
             action="store_const",
             const=sys.prefix,
             dest="prefix",
-            help="Install to Python's sys.prefix."
-            " Shorthand for --prefix='%s'. For use in conda/virtual-envs." % sys.prefix,
+            help=f"Install to Python's sys.prefix."
+            f" Shorthand for --prefix='{sys.prefix}'. For use in conda/virtual-envs."
         )
         opts = parser.parse_args(self.argv)
         try:
@@ -204,7 +204,7 @@ class InstallPickyKernelSpecApp(Application):
                     print("Perhaps you want `sudo` or `--user`?", file=sys.stderr)
                 self.exit(1)
             raise
-        print("Installed kernelspec %s in %s" % (opts.name, dest))
+        print(f"Installed kernelspec {opts.name} in {dest}")
 
 
 main = InstallPickyKernelSpecApp.launch_instance
