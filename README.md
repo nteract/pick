@@ -34,7 +34,7 @@ When we were looking at initial design, we considered the approach of changing t
 
 Instead, we decided to use magic -- kernel magic. In the style of other cell magics, we wanted Pick to give users a flexible kernel magic in a notebook cell.
 
-As an example, here's a kernel magic for creating a kernel that uses a conda environment:
+As an example, here's how a kernel magic for creating a kernel that uses a conda environment would work:
 
 ```
 %%kernel.conda-environment
