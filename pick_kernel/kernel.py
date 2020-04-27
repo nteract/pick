@@ -8,6 +8,7 @@ from queue import Empty
 from tornado.ioloop import IOLoop
 import zmq
 from zmq.eventloop import ioloop
+
 # Rely on Socket subclass that returns Futures for recv*
 from zmq.eventloop.future import Context
 
@@ -16,6 +17,8 @@ from ipykernel.kernelbase import Kernel
 from ipykernel.kernelapp import IPKernelApp
 from jupyter_client import AsyncKernelManager
 from jupyter_client.session import extract_header
+from IPython.core.formatters import DisplayFormatter
+from IPython.display import Markdown
 
 # Install the zmq event loop
 ioloop.install()
@@ -33,6 +36,7 @@ class KernelProxy(object):
     The kernel's `shell` channel is used for request/reply calls to the kernel.
     The `KernelProxy` hooks up relay of messages on the shell channel.
     """
+
     def __init__(self, manager, shell_upstream):
         self.manager = manager
         # TODO: Connect Control & STDIN
@@ -53,6 +57,7 @@ class KernelProxy(object):
 
 class PickyKernel(Kernel):
     """A kernel that accepts kernel magics which configure the environment"""
+
     implementation = "picky"
     implementation_version = __version__
 
@@ -94,6 +99,8 @@ Read more about it at https://github.com/nteract/pick
 
         self.acquiring_kernel = asyncio.Lock()
         self.kernel_launched = asyncio.Event()
+
+        self.display_formatter = DisplayFormatter()
 
     def start(self):
         """Start the PickyKernel and its event loop"""
@@ -220,14 +227,16 @@ Read more about it at https://github.com/nteract/pick
         kernel = await self.get_kernel()
         self.session.send(kernel.shell, parent, ident=ident)
 
-    def _publish_display_data(
-        self, data, metadata=None, transient=None, parent=None, update=False
-    ):
-        """publish display data"""
+    def display(self, obj, parent, display_id=False, update=False):
+        """Publish a rich format of an object from our picky kernel, associated with the parent message"""
+        data, metadata = self.display_formatter.format(obj)
+
         if metadata is None:
             metadata = {}
-        if transient is None:
-            transient = {}
+
+        transient = {}
+        if display_id:
+            transient = {"display_id": display_id}
 
         content = {"data": data, "metadata": metadata, "transient": transient}
 
@@ -245,21 +254,25 @@ Read more about it at https://github.com/nteract/pick
             if self.child_kernel is None:
                 kernel_display_id = hexlify(os.urandom(8)).decode("ascii")
 
-                self._publish_display_data(
-                    {"text/markdown": "Preparing default kernel..."},
-                    transient={"display_id": kernel_display_id},
+                self.display(
+                    Markdown("Preparing default kernel..."),
                     parent=parent,
+                    display_id=kernel_display_id,
                 )
 
                 # NOTE: this is the default kernel launch with no config passed
                 self.child_kernel = await self.start_kernel()
-                self._publish_display_data(
-                    # Wipe out the previous message
-                    {"text/markdown": ""},
-                    transient={"display_id": kernel_display_id},
+
+                self.display(
+                    # Wipe out the previous message.
+                    # NOTE: You would think we could make an "empty" output, but it turns out the
+                    #       Jupyter notebook frontend ignores that case for update_display_data
+                    Markdown(""),
                     parent=parent,
+                    display_id=kernel_display_id,
                     update=True,
                 )
+
             else:
                 # We can just assume to pass the child kernel at this point
                 pass
@@ -275,9 +288,9 @@ Read more about it at https://github.com/nteract/pick
 
         kernel_display_id = hexlify(os.urandom(8)).decode("ascii")
 
-        self._publish_display_data(
-            {"text/markdown": "Launching customized runtime..."},
-            transient={"display_id": kernel_display_id},
+        self.display(
+            Markdown("Launching customized runtime..."),
+            display_id=kernel_display_id,
             parent=parent,
         )
 
@@ -285,24 +298,24 @@ Read more about it at https://github.com/nteract/pick
         async with self.acquiring_kernel:
             if self.child_kernel is None:
                 self.child_kernel = await self.start_kernel(config)
-                self._publish_display_data(
-                    {"text/markdown": "Runtime ready!"},
-                    transient={"display_id": kernel_display_id},
+                self.display(
+                    Markdown("Runtime ready!"),
+                    display_id=kernel_display_id,
                     parent=parent,
                     update=True,
                 )
             else:
-                self._publish_display_data(
-                    {
-                        "text/markdown": """
+                self.display(
+                    Markdown(
+                        """
 ## Kernel already configured and launched.
 
 You can only run the `%%kernel.config` cell at the top of your notebook and the
 start of your session. Please **restart your kernel** and run the cell again if
 you want to change configuration.
 """
-                    },
-                    transient={"display_id": kernel_display_id},
+                    ),
+                    display_id=kernel_display_id,
                     parent=parent,
                     update=True,
                 )
@@ -380,6 +393,7 @@ you want to change configuration.
 
 class PickyKernelApp(IPKernelApp):
     """A kernel application for starting a `PickyKernel`, a proxying kernel with options."""
+
     kernel_class = PickyKernel
     # TODO: Uncomment this to disable IO Capture of this kernel
     # outstream_class = None
