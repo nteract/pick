@@ -4,6 +4,7 @@ import os
 import sys
 from binascii import hexlify
 from queue import Empty
+from functools import partial
 
 from tornado.ioloop import IOLoop
 import zmq
@@ -248,100 +249,137 @@ Read more about it at https://github.com/nteract/pick
             ident=self._topic("display_data"),
         )
 
-    async def launch_or_reuse_kernel(self, stream, ident, parent):
-        # Ensure that only one coroutine is getting a kernel
-        async with self.acquiring_kernel:
-            if self.child_kernel is None:
-                kernel_display_id = hexlify(os.urandom(8)).decode("ascii")
-
-                self.display(
-                    Markdown("Preparing default kernel..."),
-                    parent=parent,
-                    display_id=kernel_display_id,
-                )
-
-                # NOTE: this is the default kernel launch with no config passed
-                self.child_kernel = await self.start_kernel()
-
-                self.display(
-                    # Wipe out the previous message.
-                    # NOTE: You would think we could make an "empty" output, but it turns out the
-                    #       Jupyter notebook frontend ignores that case for update_display_data
-                    Markdown(""),
-                    parent=parent,
-                    display_id=kernel_display_id,
-                    update=True,
-                )
-
-            else:
-                # We can just assume to pass the child kernel at this point
-                pass
-
-        self.session.send(self.child_kernel.shell, parent, ident=ident)
-
-    async def launch_kernel_with_parameters(self, stream, ident, parent, config):
-        content = parent["content"]
-        code = content["code"]
-        # NOTE: We are, for the time being, ignoring the silent flag, store_history, etc.
-        self._publish_execute_input(code, parent, self.execution_count)
+    async def async_execute_request(self, stream, ident, parent):
+        """process an execution request, sending it on to the child kernel or launching one
+        if it has not been started.
+        """
+        # Announce that we are busy handling this request
         self._publish_status("busy")
 
-        kernel_display_id = hexlify(os.urandom(8)).decode("ascii")
-
-        self.display(
-            Markdown("Launching customized runtime..."),
-            display_id=kernel_display_id,
-            parent=parent,
-        )
-
-        # Ensure that only one coroutine is getting a kernel
+        # Only one kernel can be acquired at the same time
         async with self.acquiring_kernel:
-            if self.child_kernel is None:
-                self.child_kernel = await self.start_kernel(config)
-                self.display(
-                    Markdown("Runtime ready!"),
-                    display_id=kernel_display_id,
-                    parent=parent,
-                    update=True,
-                )
-            else:
+            # Check for configuration code first
+            content = parent["content"]
+            code = content["code"]
+
+            config = self.parse_cell(content["code"])
+            has_config = bool(config)
+
+            if has_config:
+                # Report back that we'll be running the config code
+                # NOTE: We are, for the time being, ignoring the silent flag, store_history, etc.
+                self._publish_execute_input(code, parent, self.execution_count)
+
+            # User is attempting to run a cell with config after the kernel is started,
+            # so we inform them and bail
+            if has_config and self.child_kernel is not None:
                 self.display(
                     Markdown(
-                        """
-## Kernel already configured and launched.
+                        """## Kernel already configured and launched.
 
 You can only run the `%%kernel.config` cell at the top of your notebook and the
 start of your session. Please **restart your kernel** and run the cell again if
 you want to change configuration.
 """
                     ),
+                    parent=parent,
+                )
+
+                # Complete the "execution request" so the jupyter client (e.g. the notebook) thinks
+                # execution is finished
+                reply_content = {
+                    "status": "error",
+                    "execution_count": self.execution_count,
+                    "user_expressions": {},
+                    "payload": {},
+                }
+
+                metadata = {
+                    "parametrized-kernel": True,
+                    "status": reply_content["status"],
+                }
+
+                self.session.send(
+                    stream,
+                    "execute_reply",
+                    reply_content,
+                    parent,
+                    metadata=metadata,
+                    ident=ident,
+                )
+                self._publish_status("idle")
+                return
+
+            kernel_display_id = hexlify(os.urandom(8)).decode("ascii")
+
+            # Launching a custom kernel
+            if self.child_kernel is None and has_config:
+                # Start a kernel now
+                # If there's config set, we launch with that config
+
+                # If the user is requesting the kernel with config, launch it!
+                self.display(
+                    Markdown("Launching customized runtime..."),
+                    display_id=kernel_display_id,
+                    parent=parent,
+                )
+                self.child_kernel = await self.start_kernel(config)
+
+                self.display(
+                    Markdown("Runtime ready!"),
                     display_id=kernel_display_id,
                     parent=parent,
                     update=True,
                 )
 
-        # Complete the "execution request" so the jupyter client (e.g. the notebook) thinks
-        # execution is finished
-        reply_content = {
-            "status": "ok",
-            # TODO: Adjust this since we're one step behind the "real" kernel
-            "execution_count": self.execution_count,
-            # Note: user_expressions are not supported on our kernel creation magic
-            "user_expressions": {},
-            "payload": {},
-        }
+                # Complete the "execution request" so the jupyter client (e.g. the notebook) thinks
+                # execution is finished
+                reply_content = {
+                    "status": "ok",
+                    "execution_count": self.execution_count,
+                    # Note: user_expressions are not supported on our kernel creation magic
+                    "user_expressions": {},
+                    "payload": {},
+                }
 
-        metadata = {"parametrized-kernel": True, "status": reply_content["status"]}
+                metadata = {
+                    "parametrized-kernel": True,
+                    "status": reply_content["status"],
+                }
 
-        self.session.send(
-            stream,
-            "execute_reply",
-            reply_content,
-            parent,
-            metadata=metadata,
-            ident=ident,
-        )
-        self._publish_status("idle")
+                self.session.send(
+                    stream,
+                    "execute_reply",
+                    reply_content,
+                    parent,
+                    metadata=metadata,
+                    ident=ident,
+                )
+                self._publish_status("idle")
+
+                # With that, we're all done launching the customized kernel and
+                # pushing updates on the kernel to the user.
+                return
+
+            # Start the default kernel to run code
+            if self.child_kernel is None:
+                self.display(
+                    Markdown("Preparing default kernel..."),
+                    parent=parent,
+                    display_id=kernel_display_id,
+                )
+                self.child_kernel = await self.start_kernel()
+                self.display(
+                    # Wipe out the previous message.
+                    # NOTE: The Jupyter notebook frontend ignores the case of an empty output for
+                    #       an update_display_data so we have to publish some empty content instead.
+                    Markdown(""),
+                    parent=parent,
+                    display_id=kernel_display_id,
+                    update=True,
+                )
+
+            self.session.send(self.child_kernel.shell, parent, ident=ident)
 
     def parse_cell(self, cell):
         if not cell.startswith("%%kernel."):
@@ -355,36 +393,25 @@ you want to change configuration.
         except Exception:
             return None
 
+    def _log_task_exceptions(self, task):
+        try:
+            task_exception = task.exception()
+            if task_exception:
+                self.log.error(task_exception)
+                self.log.error(task.get_stack(limit=5))
+        except asyncio.CancelledError as err:
+            self.log.error(err)
+
     def relay_execute_to_kernel(self, stream, ident, parent):
-        # Check for configuraiton code first
-        content = parent["content"]
-        cell = content["code"]
-
-        # Check cell for our config
-        config = self.parse_cell(content["code"])
-        if config:
-            # Launch the kernel with the config to start
-            # However, if the kernel is already started and we see this cell
-            # We need to inform the user
-            asyncio.create_task(
-                self.launch_kernel_with_parameters(stream, ident, parent, config)
-            )
-            # NOTE: We respond to the execution message in the above task
-            return
-
-        else:
-            # Run the code or assume we start the default kernel
-            # relay_to_kernel is synchronous and we rely on an asynchronous start
-            # so we create each kernel message as a task...
-            asyncio.create_task(self.launch_or_reuse_kernel(stream, ident, parent))
+        # Shove this execution onto the task queue
+        task = asyncio.create_task(self.async_execute_request(stream, ident, parent))
+        task.add_done_callback(partial(self._log_task_exceptions, task))
 
     def relay_to_kernel(self, stream, ident, parent):
         # relay_to_kernel is synchronous, and we rely on an asynchronous start
         # so we create each kernel message as a task...
-        asyncio.create_task(self.queue_before_relay(stream, ident, parent))
-
-        # TODO: All non-execution requests prior to the kernel starting up must be queued
-        #       up otherwise they're starting a kernel currently...
+        task = asyncio.create_task(self.queue_before_relay(stream, ident, parent))
+        task.add_done_callback(partial(self._log_task_exceptions, task))
 
     execute_request = relay_execute_to_kernel
     inspect_request = relay_to_kernel
