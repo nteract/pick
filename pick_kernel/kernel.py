@@ -18,7 +18,7 @@ from ipykernel.kernelapp import IPKernelApp
 from IPython.core.formatters import DisplayFormatter
 from IPython.display import Markdown
 
-from .subkernel import pick_subkernels
+from .subkernel import _subkernels
 
 # Install the zmq event loop
 ioloop.install()
@@ -127,7 +127,7 @@ Read more about it at https://github.com/nteract/pick
         base, ext = os.path.splitext(self.parent.connection_file)
         connection_file = "{base}-child{ext}".format(base=base, ext=ext,)
 
-        subkernel = pick_subkernels.get_subkernel(name)
+        subkernel = _subkernels.get_subkernel(name)
 
         try:
             km = await subkernel.launch(
