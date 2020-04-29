@@ -30,6 +30,8 @@ class Subkernel(object):
 
     @staticmethod
     async def launch(config, session, context, connection_file):
+        """This must return an AsyncKernelManager() that has
+        already had start_kernel called on it"""
         raise NotImplementedError("launch must be implemented")
 
 
