@@ -13,13 +13,12 @@ from zmq.eventloop import ioloop
 # Rely on Socket subclass that returns Futures for recv*
 from zmq.eventloop.future import Context
 
-from ipykernel.jsonutil import json_clean
 from ipykernel.kernelbase import Kernel
 from ipykernel.kernelapp import IPKernelApp
-from jupyter_client import AsyncKernelManager
-from jupyter_client.session import extract_header
 from IPython.core.formatters import DisplayFormatter
 from IPython.display import Markdown
+
+from .subkernel import _subkernels
 
 # Install the zmq event loop
 ioloop.install()
@@ -81,6 +80,9 @@ Read more about it at https://github.com/nteract/pick
         "file_extension": ".py",
     }
 
+    default_kernel = None
+    default_config = None
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Ensure the kernel we work with uses Futures on recv, so we can await them
@@ -120,44 +122,22 @@ Read more about it at https://github.com/nteract/pick
             # Send the message up to the consumer (for example, the notebook)
             self.iopub_socket.send_multipart(msg)
 
-    async def start_kernel(self, config=None):
+    async def start_kernel(self, name=None, config=None):
         # Create a connection file that is named as a child of this kernel
         base, ext = os.path.splitext(self.parent.connection_file)
-        cf = "{base}-child{ext}".format(base=base, ext=ext,)
+        connection_file = "{base}-child{ext}".format(base=base, ext=ext,)
 
-        # TODO: pass config into kernel launch
-        km = AsyncKernelManager(
-            kernel_name="python3",
-            # Pass our IPython session as the session for the KernelManager
-            session=self.session,
-            # Use the same ZeroMQ context that allows for awaiting on recv
-            context=self.future_context,
-            connection_file=cf,
-            # TODO: Figure out if this can be relied on
-            # extra_arguments=["-c", "x = 89898977"],
-            # extra_env={},
-        )
+        subkernel = _subkernels.get_subkernel(name)
 
-        # Due to how kernel_cmd is no longer in vogue, we have to set
-        # this extra field that just plain has to be set
-        km.extra_env = {}
-
-        if config is None:
-            config = ""
-
-        km.kernel_cmd = [
-            "python3",
-            "-m",
-            "ipykernel_launcher",
-            "-f",
-            "{connection_file}",
-            "-c",
-            f"""the_config = '''{config}''';""",
-        ]
-        self.log.info("launching child kernel with")
-        self.log.info(km.kernel_cmd)
-
-        await km.start_kernel()
+        try:
+            km = await subkernel.launch(
+                config=config,
+                session=self.session,
+                context=self.future_context,
+                connection_file=connection_file,
+            )
+        except Exception as err:
+            self.log.error(err)
 
         kernel = KernelProxy(manager=km, shell_upstream=self.shell_stream)
         self.iosub.connect(kernel.iopub_url)
@@ -193,8 +173,8 @@ Read more about it at https://github.com/nteract/pick
 
             if not await kc.is_alive():
                 # TODO: Emit child kernel death message into the notebook output
-                raise RuntimeError("Kernel died before replying to kernel_info")
                 self.log.error("Kernel died while launching")
+                raise RuntimeError("Kernel died before replying to kernel_info")
 
             # Wait before sending another kernel info request
             await asyncio.sleep(0.1)
@@ -262,7 +242,7 @@ Read more about it at https://github.com/nteract/pick
             content = parent["content"]
             code = content["code"]
 
-            config = self.parse_cell(content["code"])
+            config, kernel_name = self.parse_cell(content["code"])
             has_config = bool(config)
 
             if has_config:
@@ -275,9 +255,9 @@ Read more about it at https://github.com/nteract/pick
             if has_config and self.child_kernel is not None:
                 self.display(
                     Markdown(
-                        """## Kernel already configured and launched.
+                        f"""## Kernel already configured and launched.
 
-You can only run the `%%kernel.config` cell at the top of your notebook and the
+You can only run the `%%kernel.{kernel_name}` cell at the top of your notebook and the
 start of your session. Please **restart your kernel** and run the cell again if
 you want to change configuration.
 """
@@ -323,7 +303,7 @@ you want to change configuration.
                     display_id=kernel_display_id,
                     parent=parent,
                 )
-                self.child_kernel = await self.start_kernel(config)
+                self.child_kernel = await self.start_kernel(kernel_name, config)
 
                 self.display(
                     Markdown("Runtime ready!"),
@@ -368,7 +348,9 @@ you want to change configuration.
                     parent=parent,
                     display_id=kernel_display_id,
                 )
-                self.child_kernel = await self.start_kernel()
+                self.child_kernel = await self.start_kernel(
+                    self.default_kernel, self.default_config
+                )
                 self.display(
                     # Wipe out the previous message.
                     # NOTE: The Jupyter notebook frontend ignores the case of an empty output for
@@ -383,15 +365,18 @@ you want to change configuration.
 
     def parse_cell(self, cell):
         if not cell.startswith("%%kernel."):
-            return None
+            return None, None
 
         try:
             # Split off our config from the kernel magic name
-            _, raw_config = cell.split("\n", 1)
+            magic_name, raw_config = cell.split("\n", 1)
 
-            return raw_config
-        except Exception:
-            return None
+            kernel_name = magic_name.split("%%kernel.")[1]
+
+            return raw_config, kernel_name
+        except Exception as err:
+            self.log.error(err)
+            return None, None
 
     def _log_task_exceptions(self, task):
         try:
