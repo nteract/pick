@@ -261,7 +261,8 @@ Read more about it at https://github.com/nteract/pick
             "ename": exc_type.__name__,
             "evalue": str(exception),
             "traceback": format_tb(traceback),
-            "execution_count": self.execution_count,
+            # Since this isn't the underlying kernel
+            "execution_count": None,
         }
 
         self.session.send(
@@ -313,7 +314,9 @@ you want to change configuration.
                 # execution is finished
                 reply_content = {
                     "status": "error",
-                    "execution_count": self.execution_count,
+                    # Since our result is not part of `In` or `Out`, ensure
+                    # that the execution count is unset
+                    "execution_count": None,
                     "user_expressions": {},
                     "payload": {},
                 }
@@ -398,7 +401,8 @@ These are the available kernels:
                 # execution is finished
                 reply_content = {
                     "status": "ok",
-                    "execution_count": self.execution_count,
+                    # Our kernel setup is always the zero-th execution (In[] starts at 1)
+                    "execution_count": 0,
                     # Note: user_expressions are not supported on our kernel creation magic
                     "user_expressions": {},
                     "payload": {},
