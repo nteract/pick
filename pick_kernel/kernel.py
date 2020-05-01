@@ -6,6 +6,8 @@ from binascii import hexlify
 from queue import Empty
 from functools import partial
 
+from traceback import format_tb
+
 from tornado.ioloop import IOLoop
 import zmq
 from zmq.eventloop import ioloop
@@ -19,6 +21,7 @@ from IPython.core.formatters import DisplayFormatter
 from IPython.display import Markdown
 
 from .subkernel import _subkernels
+from .exceptions import PickRegistrationException
 
 # Install the zmq event loop
 ioloop.install()
@@ -205,7 +208,11 @@ Read more about it at https://github.com/nteract/pick
 
     async def queue_before_relay(self, stream, ident, parent):
         """Queue messages before sending between the child and parent kernels."""
+        if not self.kernel_launched.is_set():
+            self._publish_status("busy")
+
         kernel = await self.get_kernel()
+        self._publish_status("idle")
         self.session.send(kernel.shell, parent, ident=ident)
 
     def display(self, obj, parent, display_id=False, update=False):
@@ -227,6 +234,44 @@ Read more about it at https://github.com/nteract/pick
             content,
             parent=parent,
             ident=self._topic("display_data"),
+        )
+
+    def _publish_error(self, exc_info, parent=None):
+        """send error on IOPub"""
+        exc_type, exception, traceback = exc_info
+
+        content = {
+            "ename": exc_type.__name__,
+            "evalue": str(exception),
+            "traceback": format_tb(traceback),
+        }
+        self.session.send(
+            self.iopub_socket,
+            "error",
+            content,
+            parent=parent,
+            ident=self._topic("error"),
+        )
+
+    def _publish_execute_reply_error(self, exc_info, ident, parent):
+        exc_type, exception, traceback = exc_info
+
+        reply_content = {
+            "status": "error",
+            "ename": exc_type.__name__,
+            "evalue": str(exception),
+            "traceback": format_tb(traceback),
+            # Since this isn't the underlying kernel
+            "execution_count": None,
+        }
+
+        self.session.send(
+            self.shell_stream,
+            "execute_reply",
+            reply_content,
+            parent=parent,
+            metadata={"status": "error"},
+            ident=ident,
         )
 
     async def async_execute_request(self, stream, ident, parent):
@@ -269,7 +314,9 @@ you want to change configuration.
                 # execution is finished
                 reply_content = {
                     "status": "error",
-                    "execution_count": self.execution_count,
+                    # Since our result is not part of `In` or `Out`, ensure
+                    # that the execution count is unset
+                    "execution_count": None,
                     "user_expressions": {},
                     "payload": {},
                 }
@@ -303,7 +350,45 @@ you want to change configuration.
                     display_id=kernel_display_id,
                     parent=parent,
                 )
-                self.child_kernel = await self.start_kernel(kernel_name, config)
+                try:
+                    self.child_kernel = await self.start_kernel(kernel_name, config)
+                except PickRegistrationException as err:
+                    # Get access to the exception info prior to doing any potential awaiting
+                    exc_info = sys.exc_info()
+                    self.log.info(exc_info)
+
+                    separator = "\n"
+
+                    self.display(
+                        Markdown(
+                            f"""## There is no kernel magic named `{kernel_name}`
+
+These are the available kernels: 
+
+{separator.join([f"* `{kernel}`" for kernel in _subkernels.list_subkernels()])}
+
+                        """
+                        ),
+                        display_id=kernel_display_id,
+                        update=True,
+                        parent=parent,
+                    )
+                    self.log.error(err)
+                    self._publish_execute_reply_error(
+                        exc_info, ident=ident, parent=parent
+                    )
+                    self._publish_status("idle", parent=parent)
+                    return
+
+                except Exception as err:
+                    self.log.error(err)
+                    exc_info = sys.exc_info()
+                    self._publish_error(exc_info, parent=parent)
+                    self._publish_execute_reply_error(
+                        exc_info, ident=ident, parent=parent
+                    )
+                    self._publish_status("idle", parent=parent)
+                    return
 
                 self.display(
                     Markdown("Runtime ready!"),
@@ -316,7 +401,8 @@ you want to change configuration.
                 # execution is finished
                 reply_content = {
                     "status": "ok",
-                    "execution_count": self.execution_count,
+                    # Our kernel setup is always the zero-th execution (In[] starts at 1)
+                    "execution_count": 0,
                     # Note: user_expressions are not supported on our kernel creation magic
                     "user_expressions": {},
                     "payload": {},
@@ -378,13 +464,15 @@ you want to change configuration.
             self.log.error(err)
             return None, None
 
-    def _log_task_exceptions(self, task):
+    def _log_task_exceptions(self, task, *args, **kwargs):
         try:
             task_exception = task.exception()
             if task_exception:
                 self.log.error(task_exception)
                 self.log.error(task.get_stack(limit=5))
         except asyncio.CancelledError as err:
+            self.log.error(err)
+        except Exception as err:
             self.log.error(err)
 
     def relay_execute_to_kernel(self, stream, ident, parent):
