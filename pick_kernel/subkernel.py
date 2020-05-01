@@ -17,6 +17,13 @@ class SubKernels(object):
             raise PickRegistrationException(f"No subkernel named {name} found")
         return subkernel
 
+    def list_subkernels(self):
+        """Returns a list of available subkernels"""
+        return [
+            f"%%kernel.{name}"
+            for name in filter(lambda x: x is not None, self._subkernels.keys())
+        ]
+
     def launch_subkernel(self, name=None):
         return self.get_subkernel(name).launch()
 
@@ -65,3 +72,5 @@ _subkernels.register("ipykernel", DefaultKernel)
 
 # Expose registration at a top level
 register = _subkernels.register
+list_subkernels = _subkernels.list_subkernels
+get_subkernel = _subkernels.get_subkernel
