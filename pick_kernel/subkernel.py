@@ -3,7 +3,7 @@ from .exceptions import PickRegistrationException
 from jupyter_client import AsyncKernelManager
 
 
-class SubKernels(object):
+class Subkernels(object):
     def __init__(self):
         self._subkernels = {}
 
@@ -66,7 +66,7 @@ class DefaultKernel(Subkernel):
 
 
 # Instantiate a SubKernels instance, register Handlers
-_subkernels = SubKernels()
+_subkernels = Subkernels()
 _subkernels.register(None, DefaultKernel)
 _subkernels.register("ipykernel", DefaultKernel)
 
