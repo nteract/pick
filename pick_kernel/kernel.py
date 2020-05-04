@@ -9,11 +9,9 @@ from functools import partial
 from traceback import format_tb
 
 from tornado.ioloop import IOLoop
-import zmq
-from zmq.eventloop import ioloop
 
-# Rely on Socket subclass that returns Futures for recv*
-from zmq.eventloop.future import Context
+import zmq
+from zmq.asyncio import Context
 
 from ipykernel.kernelbase import Kernel
 from ipykernel.kernelapp import IPKernelApp
@@ -22,9 +20,6 @@ from IPython.display import Markdown
 
 from .subkernel import _subkernels
 from .exceptions import PickRegistrationException
-
-# Install the zmq event loop
-ioloop.install()
 
 banner = """\
 Proxies to another kernel, launched underneath
@@ -89,7 +84,7 @@ Read more about it at https://github.com/nteract/pick
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Ensure the kernel we work with uses Futures on recv, so we can await them
-        self.future_context = ctx = Context()
+        self.context = ctx = Context.instance()
 
         # Our subscription to messages from the kernel we launch
         self.iosub = ctx.socket(zmq.SUB)
@@ -136,7 +131,7 @@ Read more about it at https://github.com/nteract/pick
             km = await subkernel.launch(
                 config=config,
                 session=self.session,
-                context=self.future_context,
+                context=self.context,
                 connection_file=connection_file,
             )
         except Exception as err:
