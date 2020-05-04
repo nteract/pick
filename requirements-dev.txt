@@ -1,3 +1,4 @@
+papermill
 pytest
 pytest-asyncio
 tox
