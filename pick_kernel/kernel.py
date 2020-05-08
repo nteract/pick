@@ -269,6 +269,17 @@ Read more about it at https://github.com/nteract/pick
             ident=ident,
         )
 
+    def _publish_status(self, status, parent=None):
+        """send status (busy/idle) on IOPub"""
+        self.session.send(
+            self.iopub_socket,
+            "status",
+            {"execution_state": status},
+            parent=parent or self._parent_header,
+            ident=self._topic("status"),
+            metadata={"picky": True},
+        )
+
     async def async_execute_request(self, stream, ident, parent):
         """process an execution request, sending it on to the child kernel or launching one
         if it has not been started.
@@ -416,7 +427,6 @@ These are the available kernels:
                     metadata=metadata,
                     ident=ident,
                 )
-                self._publish_status("idle")
 
                 # With that, we're all done launching the customized kernel and
                 # pushing updates on the kernel to the user.
