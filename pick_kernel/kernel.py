@@ -13,7 +13,7 @@ from tornado.ioloop import IOLoop
 import zmq
 from zmq.asyncio import Context
 
-from ipykernel.kernelbase import Kernel
+from .kernelbase import Kernel
 from ipykernel.kernelapp import IPKernelApp
 from IPython.core.formatters import DisplayFormatter
 from IPython.display import Markdown
