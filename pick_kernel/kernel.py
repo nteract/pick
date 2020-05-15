@@ -18,7 +18,7 @@ from ipykernel.kernelapp import IPKernelApp
 from IPython.core.formatters import DisplayFormatter
 from IPython.display import Markdown
 
-from .subkernel import _subkernels
+import subkernels
 from .exceptions import PickRegistrationException
 
 banner = """\
@@ -125,7 +125,7 @@ Read more about it at https://github.com/nteract/pick
         base, ext = os.path.splitext(self.parent.connection_file)
         connection_file = "{base}-child{ext}".format(base=base, ext=ext,)
 
-        subkernel = _subkernels.get_subkernel(name)
+        subkernel = subkernels.get_subkernel(name)
 
         try:
             km = await subkernel.launch(
@@ -371,7 +371,7 @@ you want to change configuration.
 
 These are the available kernels: 
 
-{separator.join([f"* `{kernel}`" for kernel in _subkernels.list_subkernels()])}
+{separator.join([f"* `{kernel}`" for kernel in subkernels.list_subkernels()])}
 
                         """
                         ),

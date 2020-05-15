@@ -5,13 +5,13 @@ import unittest
 
 from mock import Mock
 
-from .. import subkernel
+from .. import subkernels
 from .. import exceptions
 
 
 class TestSubkernelRegistration(unittest.TestCase):
     def setUp(self):
-        self.subkernels = subkernel.Subkernels()
+        self.subkernels = subkernels.Subkernels()
 
     def test_registration(self):
         mock_subkernel = Mock()
