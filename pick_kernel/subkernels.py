@@ -2,6 +2,8 @@ from .exceptions import PickRegistrationException
 
 from jupyter_client import AsyncKernelManager
 
+import entrypoints
+
 
 class Subkernels(object):
     def __init__(self):
@@ -9,6 +11,13 @@ class Subkernels(object):
 
     def register(self, name, subkernel):
         self._subkernels[name] = subkernel
+
+    def register_entry_points(self):
+        """Register entrypoints for a subkernel
+        Load handlers provided by other packages
+        """
+        for entrypoint in entrypoints.get_group_all("pick_kernel.subkernel"):
+            self.register(entrypoint.name, entrypoint.load())
 
     def get_subkernel(self, name=None):
         """Retrieves an engine by name."""
@@ -65,10 +74,11 @@ class DefaultKernel(Subkernel):
         return km
 
 
-# Instantiate a SubKernels instance, register Handlers
+# Instantiate a SubKernels instance, register Handlers and entrypoints
 _subkernels = Subkernels()
 _subkernels.register(None, DefaultKernel)
 _subkernels.register("ipykernel", DefaultKernel)
+_subkernels.register_entry_points()
 
 # Expose registration at a top level
 register = _subkernels.register
