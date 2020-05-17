@@ -3,7 +3,7 @@
 
 import unittest
 
-from mock import Mock
+from mock import Mock, patch
 
 from .. import subkernels
 from .. import exceptions
@@ -30,3 +30,18 @@ class TestSubkernelRegistration(unittest.TestCase):
             self.subkernels.get_subkernel,
             "non-existent",
         )
+
+    def test_registering_entry_points(self):
+        fake_entrypoint = Mock(load=Mock())
+        fake_entrypoint.name = "fake-subkernel"
+
+        with patch(
+            "entrypoints.get_group_all", return_value=[fake_entrypoint]
+        ) as mock_get_group_all:
+
+            self.subkernels.register_entry_points()
+            mock_get_group_all.assert_called_once_with("pick_kernel.subkernel")
+            self.assertEqual(
+                self.subkernels.get_subkernel("fake-subkernel"),
+                fake_entrypoint.load.return_value,
+            )
