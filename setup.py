@@ -7,6 +7,15 @@ if not local_path:
     local_path = "."
 here = os.path.abspath(local_path)
 
+
+def version():
+    with open(here + "/pick_kernel/version.py", "r") as ver:
+        for line in ver.readlines():
+            if line.startswith("version ="):
+                return line.split(" = ")[-1].strip()[1:-1]
+    raise ValueError("No version found in pick_kernel/version.py")
+
+
 # Get the long description from the README file
 with open(os.path.join(here, "README.md"), encoding="utf-8") as f:
     long_description = f.read()
@@ -34,7 +43,7 @@ extras_require = {
 
 setuptools.setup(
     name="pick_kernel",
-    version="0.0.1",
+    version=version(),
     author="Kyle Kelley",
     author_email="rgbkrk@gmail.com",
     description="The Jupyter Kernel for Choosy Users",
