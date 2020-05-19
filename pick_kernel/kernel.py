@@ -18,7 +18,8 @@ from ipykernel.kernelapp import IPKernelApp
 from IPython.core.formatters import DisplayFormatter
 from IPython.display import Markdown
 
-import subkernels
+
+from . import subkernels
 from .exceptions import PickRegistrationException
 
 banner = """\
