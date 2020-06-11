@@ -45,3 +45,19 @@ class TestSubkernelRegistration(unittest.TestCase):
                 self.subkernels.get_subkernel("fake-subkernel"),
                 fake_entrypoint.load.return_value,
             )
+
+    def test_listing(self):
+        mock_subkernel = Mock(spec=["hidden"])
+
+        mock_subkernel.hidden = False
+        self.subkernels.register("mock_subkernel", mock_subkernel)
+        retrieved_subkernel = self.subkernels.get_subkernel("mock_subkernel")
+        self.assertIs(mock_subkernel, retrieved_subkernel)
+
+        hidden_mock_subkernel = Mock(spec=["hidden"])
+        hidden_mock_subkernel.hidden = True
+        self.subkernels.register("hidden_mock_subkernel", hidden_mock_subkernel)
+        retrieved_subkernel = self.subkernels.get_subkernel("hidden_mock_subkernel")
+        self.assertIs(hidden_mock_subkernel, retrieved_subkernel)
+
+        self.assertEqual(self.subkernels.list_subkernels(), ["%%kernel.mock_subkernel"])

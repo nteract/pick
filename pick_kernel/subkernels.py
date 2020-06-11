@@ -31,6 +31,7 @@ class Subkernels(object):
         return [
             f"%%kernel.{name}"
             for name in filter(lambda x: x is not None, self._subkernels.keys())
+            if not getattr(self._subkernels[name], "hidden", False)
         ]
 
     def launch_subkernel(self, name=None):
@@ -52,6 +53,8 @@ class Subkernel(object):
 
 
 class DefaultKernel(Subkernel):
+    hidden = True
+
     @staticmethod
     async def launch(config, session, context, connection_file):
         args = []
