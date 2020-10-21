@@ -1,4 +1,4 @@
-!pick](https://user-images.githubusercontent.com/836375/80047181-94e7df80-84c1-11ea-9fea-f2d8f0fc0258.png)
+![pick](https://user-images.githubusercontent.com/836375/80047181-94e7df80-84c1-11ea-9fea-f2d8f0fc0258.png)
 
 Customize your kernels on launch!
 
