@@ -1,4 +1,15 @@
-"""Base class for a kernel that talks to frontends over 0MQ."""
+"""Base class for a kernel that talks to frontends over 0MQ.
+
+This is an active fork of the kernelbase from ipykernel, to make it an async kernelbase.
+
+One of the issues we've been running into is that some of the functions are classic
+synchronous blocking python calls and some are asynchronous. This leads to a mismatch
+in timing/coordination.
+
+"""
+
+# Plan: create an async kernelbase
+# 
 
 # Modified from ipykernel's kernelbase.py
 # Copyright (c) IPython Development Team.
