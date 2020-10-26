@@ -4,3 +4,4 @@ pytest
 pytest-asyncio
 tox
 mock
+click
