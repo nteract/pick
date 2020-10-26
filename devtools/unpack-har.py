@@ -16,7 +16,7 @@ def unpack(input_har, output_json):
             for message in entry["_webSocketMessages"]:
                 # Now we can deserialize the kernel message
                 clean_message = {
-                    "data": json.loads(message["data"]),
+                    "message": json.loads(message["data"]),
                     "type": message["type"],
                     "time": message["time"],
                 }
