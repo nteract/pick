@@ -2,12 +2,7 @@ import json
 import click
 
 
-@click.command()
-@click.argument("input_har", type=click.File("r"))
-@click.argument("output_json", type=click.File("w"))
-def unpack(input_har, output_json):
-    data = json.load(input_har)
-
+def unpack_messages(data):
     all_websocket_messages = []
 
     for entry in data["log"]["entries"]:
@@ -16,11 +11,21 @@ def unpack(input_har, output_json):
             for message in entry["_webSocketMessages"]:
                 # Now we can deserialize the kernel message
                 clean_message = {
-                    "message": json.loads(message["data"]),
+                    "payload": json.loads(message["data"]),
                     "type": message["type"],
                     "time": message["time"],
                 }
                 all_websocket_messages.append(clean_message)
+    return all_websocket_messages
+
+
+@click.command()
+@click.argument("input_har", type=click.File("r"))
+@click.argument("output_json", type=click.File("w"))
+def unpack(input_har, output_json):
+    data = json.load(input_har)
+
+    unpack_messages(data)
 
     json.dump(all_websocket_messages, output_json, indent=4)
 
