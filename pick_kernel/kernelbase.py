@@ -9,7 +9,7 @@ in timing/coordination.
 """
 
 # Plan: create an async kernelbase
-# 
+#
 
 # Modified from ipykernel's kernelbase.py
 # Copyright (c) IPython Development Team.
@@ -211,7 +211,7 @@ class Kernel(SingletonConfigurable):
         self._publish_status(u"busy")
         if self._aborting:
             self._send_abort_reply(self.control_stream, msg, idents)
-            self._publish_status(u"idle")
+            # self._publish_status(u"idle")
             return
 
         header = msg["header"]
@@ -228,7 +228,7 @@ class Kernel(SingletonConfigurable):
 
         sys.stdout.flush()
         sys.stderr.flush()
-        self._publish_status(u"idle")
+        # self._publish_status(u"idle")
         # flush to ensure reply is sent
         self.control_stream.flush(zmq.POLLOUT)
 
@@ -258,11 +258,12 @@ class Kernel(SingletonConfigurable):
 
         # Set the parent message for side effects.
         self.set_parent(idents, msg)
+
         self._publish_status(u"busy")
 
         if self._aborting:
             self._send_abort_reply(stream, msg, idents)
-            self._publish_status(u"idle")
+            # self._publish_status(u"idle")
             # flush to ensure reply is sent before
             # handling the next request
             stream.flush(zmq.POLLOUT)
@@ -302,7 +303,7 @@ class Kernel(SingletonConfigurable):
 
         sys.stdout.flush()
         sys.stderr.flush()
-        self._publish_status(u"idle")
+        # self._publish_status(u"idle")
         # flush to ensure reply is sent before
         # handling the next request
         stream.flush(zmq.POLLOUT)

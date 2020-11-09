@@ -116,10 +116,25 @@ Read more about it at https://github.com/nteract/pick
         """Relay messages received by the Picky Kernel
            to the consumer client (e.g. notebook)
         """
+
         while True:
-            msg = await self.iosub.recv_multipart()
-            # Send the message up to the consumer (for example, the notebook)
-            self.iopub_socket.send_multipart(msg)
+            msg_list = await self.iosub.recv_multipart()
+
+            idents, msg = self.session.feed_identities(msg_list, copy=True)
+            # TODO: Do a simple string match on msg[1] to see if "status" is
+            # in the raw string before doing the more expensive JSON unpacking
+
+            # Deserialize the message
+            msg = self.session.deserialize(msg, content=True, copy=True)
+
+            self.iopub_socket.send_multipart(msg_list)
+
+            if msg["header"]["msg_type"] == "status":
+                self.log.warning("dropping status message", msg)
+                continue
+            else:
+                # Send the message up to the consumer (for example, the notebook)
+                pass
 
     async def start_kernel(self, name=None, config=None):
         # Create a connection file that is named as a child of this kernel
@@ -428,6 +443,8 @@ These are the available kernels:
                     metadata=metadata,
                     ident=ident,
                 )
+
+                self._publish_status("idle")
 
                 # With that, we're all done launching the customized kernel and
                 # pushing updates on the kernel to the user.
